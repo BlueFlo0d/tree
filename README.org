@@ -1,0 +1,3 @@
+* Install and run
+Run ~install.sh~ the first time you run.
+Run ~run.sh~ later.
