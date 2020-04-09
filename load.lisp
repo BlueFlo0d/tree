@@ -1,4 +1,7 @@
 (pushnew (make-pathname :directory (pathname-directory *load-pathname*)) asdf:*central-registry*)
+(ql:quickload "sketch")
+(ql:quickload "bst")
+(ql:quickload "cl-collider")
 (asdf:load-system :tree)
 (in-package :tree)
 (make-instance 'tree)
