@@ -1,74 +1,10 @@
-;;;; tree.lisp
+;;; tree.lisp
 
-;;; patch cl-collider
-(in-package #:sc)
-
-(defugen (dwg-plucked "DWGPlucked")
-    (&optional (freq 440.0) (amp 0.5) (gate 1) (pos 0.14) (c1 1) (c3 30) (inp 0) (release 0.1) (mul 1.0) (add 0.0))
-  ((:ar
-    (madd (multinew new 'ugen freq amp gate pos c1 c3 inp release) mul add))))
 (in-package #:tree)
-
-;;; Setup audio
-(setf *s*
-      (make-external-server
-       "localhost"
-       :port 48800
-       ;; :server-options
-       ;; (make-server-options :device "ZoomAudioD")
-       ))
-(server-boot *s*)
-;; (server-quit *s*)
-(defparameter *echo-bus* (bus-audio :chanls 2))
-
-(proxy :echo
-       (let* ((sig (in.ar *echo-bus* 2))
-              (sig (hpf.ar sig 100))
-              (sig (freeverb2.ar (car sig) (cadr sig) :mix 1.0 :room 4)))
-         (out.ar 0 sig)))
-
-(defsynth sawsynth ((gate 1) (freq 440)
-                    (amp 0.5) (pan 0) (octave 0)
-                    (intensity 0.5) (decay 0.5)
-                    (out 0)  (reverb 0.25)
-                    (echo-out *echo-bus*))
-  (let* ((cutoff (expt 100.0 intensity))
-         (decay (* 0.2 (expt 100.0 decay)))
-         (freq (* freq (expt 2 octave)))
-         (env (env-gen.kr (env (list 1 0) (list decay) (list -2)) :gate gate :act :free))
-         (fenv (env-gen.kr (perc 0.0 0.05) :level-scale (* 3.0 freq) :level-bias freq))
-         (fenv (+ fenv (* (env-gen.kr (env (list 0 1) (list 0.5) (list 2)))
-                          (sin-osc.kr 3 0 (* 0.02 freq)))))
-         (cenv (env-gen.kr (perc 0.0 (* decay 2) 1.0 -2.0) :level-scale (* cutoff freq) :level-bias freq))
-         (sig (+
-               (pan2.ar (pulse.ar (* 1.01 fenv) 0.2) 0.2)
-               (pan2.ar (pulse.ar (* 0.99 fenv) 0.2) -0.2)))
-         (sig (rlpf.ar sig cenv))
-         (sig (pan2.ar sig pan (* amp env))))
-    (out.ar out (* sig (- 1 reverb)))
-    (out.ar echo-out (* sig reverb))))
-(defsynth plucksynth ((gate 1) (freq 440)
-                      (amp 0.5) (pan 0) (octave 1)
-                      (intensity 0.1) (decay 0.5)
-                      (out 0) (reverb 0.6)
-                      (echo-out *echo-bus*))
-  (let* ((freq (* freq (expt 2 octave)))
-         (freq (* freq (+ 1 (sin-osc.kr 3 0 0.002))))
-         (decay (* 0.2 (expt 100.0 decay)))
-         (env (env-gen.kr (env (list 1 0) (list (min 0.3 (/ decay 16))) (list -2)) :gate gate))
-         (env2 (env-gen.kr (env (list 1 0) (list decay) (list -2)) :gate gate))
-         (inp (* (lf-clip-noise.ar 2000 (/ amp 3)) env))
-         (sig (dwg-plucked.ar freq amp gate 0.1 1 (/ 500 (expt 500.0 intensity)) inp)))
-    (detect-silence.ar sig 0.001 :act :free)
-    (let ((panned (pan2.ar sig pan (* amp env2))))
-      (out.ar out (* panned (- 1 reverb)))
-      (out.ar echo-out (* panned reverb)))))
-(synth :plucksynth :freq 55 :out 0 :amp 0.1)
 
 (defstruct channel
   (synth 'sawsynth)
   (amp 0.2)
-  (pan 0.0)
   (elevation 0.0)
   (color '(0 0.5 0.9)))
 (defparameter *channel-settings*
@@ -77,6 +13,10 @@
        :synth 'plucksynth
        :color '(0.5 0.0 0.9))))
 ;;; UI
+(defparameter last-gen-id 0)
+(defun gen-id (player-id)
+  (incf last-gen-id)
+  (cons player-id last-gen-id))
 (defstruct node
   (x 0 :type real)
   (y 0 :type real)
@@ -84,9 +24,12 @@
   (parent nil)
   (channel 0)
   (intensity 0.2)
-  (decay 0.2))
+  (decay 0.2)
+  (pan 0.0)
+  (id '(0 . 0)))
 (defstruct node-base
-  (nodes nil))
+  (nodes nil)
+  (idtable (make-hash-table :test 'equal)))
 (sdl2:hide-cursor)
 (defparameter *window-width* 1920)
 (defparameter *window-height* 1080)
@@ -102,7 +45,67 @@
   (* (- 1 (/ y *window-height*)) *logical-height*))
 (defun node-base-add (node-base node)
   (push node (node-base-nodes node-base))
+  (when (node-parent node)
+    (push node (node-children (node-parent node))))
+  (setf (gethash (node-id node) (node-base-idtable node-base))
+        node)
   node-base)
+(defun node-base-delete (node-base node)
+  (symbol-macrolet ((parent-place (node-children (node-parent node)))
+                    (base-place (node-base-nodes node-base)))
+    (setf parent-place (delete node parent-place))
+    (labels ((process-node (node)
+               (setf (node-parent node) nil)
+               (mapc #'process-node (node-children node))))
+      (process-node node))
+    (setf base-place
+          (delete-if (lambda (node)
+                       (unless (or (node-parent node)
+                                   (and (= (node-x node) 0)
+                                        (= (node-y node) 1)))
+                         (remhash (node-id node) (node-base-idtable node-base))))
+                     base-place))))
+(defun node-base-dump (node-base)
+  (write-to-string
+   (mapcar (lambda (n)
+             (list
+              (node-id n)
+              (when
+                  (node-parent n)
+                (node-id (node-parent n)))
+              (node-x n)
+              (node-y n)
+              (node-channel n)
+              (node-intensity n)
+              (node-decay n)
+              (node-pan n)))
+           (node-base-nodes node-base))))
+(defun node-base-load (list)
+  (let ((node-base (make-node-base)))
+    (mapc (lambda (item)
+            (destructuring-bind (id parent-id x y channel intensity decay pan) item
+              (declare (ignore parent-id))
+              (let ((new-node (make-node
+                               :id id
+                               :x x
+                               :y y
+                               :channel channel
+                               :intensity intensity
+                               :decay decay
+                               :pan pan)))
+                (push new-node (node-base-nodes node-base))
+                (setf (gethash id (node-base-idtable node-base)) new-node))))
+          list)
+    (mapc (lambda (item)
+            (destructuring-bind (id parent-id &rest things) item
+              (declare (ignore things))
+              (let ((child (gethash id (node-base-idtable node-base)))
+                    (parent (gethash parent-id (node-base-idtable node-base))))
+                (setf (node-parent child) parent)
+                (when parent
+                  (push child (node-children parent))))))
+          list)
+    node-base))
 (defun node-move-to (node target-x target-y)
   (let ((delta-x (- target-x (node-x node)))
         (delta-y (/ target-y (node-y node))))
@@ -117,26 +120,14 @@
       (if (< value 0.0)
           0.0
           value)))
-(defun node-change-param (node param delta)
+(defun node-change-param (node param delta &optional (trim-function
+                                                      #'trim-value))
   (labels ((process-node (node)
              (setf (slot-value node param)
-                   (trim-value (+ delta (slot-value node param))))
+                   (funcall trim-function (+ delta (slot-value node param))))
              (mapc #'process-node (node-children node))))
     (process-node node)))
-(defun node-delete (node-base node)
-  (symbol-macrolet ((parent-place (node-children (node-parent node)))
-                    (base-place (node-base-nodes node-base)))
-    (setf parent-place (delete node parent-place))
-    (labels ((process-node (node)
-               (setf (node-parent node) nil)
-               (mapc #'process-node (node-children node))))
-      (process-node node))
-    (setf base-place
-          (delete-if-not (lambda (node)
-                           (or (node-parent node)
-                               (and (= (node-x node) 0)
-                                    (= (node-y node) 1))))
-                         base-place))))
+
 (defun find-nearest-node (node-base x y)
   (let ((nearest-distance (+ *logical-width* *logical-height*))
         (nearest-node))
@@ -186,26 +177,79 @@
                 (when (< yne yerr)
                   (setq yerr yne)
                   (setq yc ync))))
-            '(3 4 5 6 7))
+            '(2 3))
       (values xc yc))))
+(defun crosshair (wx wy)
+  (line wx (- wy 4) wx (+ wy 6))
+  (line (- wx 5) wy (+ wx 5) wy))
+(defparameter *last-broadcast-time* 0)
+(defstruct cursor
+  (x 0)
+  (y 0)
+  (state :insert)
+  (edit-parameter 'intensity)
+  (logical-candidate-x)
+  (logical-candidate-y)
+  (base-node)
+  (selected-node)
+  (selected-channel 0))
+(defparameter *current-player-id* 0)
 (defsketch tree
-    ((title "tree")
+    ((title "Just Tree")
      (width *window-width*)
      (height *window-height*)
      (initial-time (get-internal-real-time))
      (tape-x 0)
      (node-base (node-base-add (make-node-base) (make-node :y 1)))
-     (mouse-x 0)
-     (mouse-y 0)
-     (state :insert)
-     (logical-candidate-x)
-     (logical-candidate-y)
-     (base-node)
-     (selected-node)
-     (selected-channel 0))
+     (cursors
+      (let ((new-cursors (make-hash-table)))
+        (setf (gethash 0 new-cursors) (make-cursor))
+        new-cursors))
+     (player-id 0)
+     (socket)
+     (side-socket))
   ;; (setq *window-width* width)
   ;; (setq *window-height* height)
   (background (gray 0.9))
+  ;; network
+  (if (= player-id 0)
+      (progn
+        (let ((current-time (get-internal-real-time)))
+          (when (> (- current-time *last-broadcast-time*) internal-time-units-per-second)
+            (setq *last-broadcast-time* current-time)
+            (pzmq:send socket (node-base-dump node-base))))
+        (handler-case
+            (loop for i from 1
+                  do (let* ((msg (pzmq:recv-string side-socket :dontwait t))
+                            (list (read-from-string msg)))
+                       (pzmq:send socket msg)
+                       (apply (symbol-function (car list))
+                              (cons sketch::instance (cdr list)))))
+          (pzmq:eagain ())))
+      (progn
+        (handler-case
+            (loop for i from 1
+                  do (let* ((msg (pzmq:recv-string socket :dontwait t))
+                            (list (read-from-string msg)))
+                       (typecase (car list)
+                         (cons
+                          (setq node-base
+                                (node-base-load list))
+                          (maphash
+                           (lambda (key cursor)
+                             (with-slots (base-node selected-node) cursor
+                               (when base-node
+                                 (setq base-node (gethash (node-id base-node) (node-base-idtable node-base))))
+                               (when selected-node
+                                 (setq selected-node (gethash (node-id selected-node) (node-base-idtable node-base))))))
+                           cursors))
+                         (symbol
+                          (when (not (= (cadr list) player-id))
+
+                            (apply (symbol-function (car list))
+                                   (cons sketch::instance (cdr list))))))))
+          (pzmq:eagain ()))))
+  ;; grid
   (with-pen (make-pen :stroke (rgb 0.5 0.5 1.0 0.4))
     (loop for i from 1 below *logical-width*
           do (let ((wx (logical-to-window-x i)))
@@ -213,6 +257,7 @@
     (loop for i from 1 below *logical-height*
           do (let ((wy (logical-to-window-y i)))
                (line 0 wy *window-width* wy))))
+  ;; tape
   (let ((new-tape-x
           (* width (mod (/ (- (get-internal-real-time) initial-time) internal-time-units-per-second 12.0) 1.0))))
     (mapc (lambda (node)
@@ -221,7 +266,7 @@
                       channel)
                      :freq (* (node-y node) 55.0)
                      :amp (channel-amp channel)
-                     :pan (channel-pan channel)
+                     :pan (/ (node-pan node) pi)
                      :intensity (node-intensity node)
                      :decay (node-decay node))))
           (find-swept-nodes node-base
@@ -230,118 +275,205 @@
     (setq tape-x new-tape-x))
   (with-pen (make-pen :stroke (rgb 0 0.5 0.9 0.4))
     (line tape-x 0 tape-x height))
+  ;; draw node-base
   (with-pen (make-pen :stroke (gray 0.8))
     (mapc (lambda (node)
             (let ((wx (logical-to-window-x
                        (node-x node)))
                   (wy (logical-to-window-y
-                       (node-y node))))
-              (with-pen (let ((color (channel-color
-                                      (aref *channel-settings* (node-channel node)))))
-                          (make-pen :fill (apply #'rgb `(,@color ,(node-decay node)))
-                                    :stroke (apply #'rgb `(,@color 1.0))))
-                (circle wx wy
-                        (+ 10
-                           (* 20 (node-intensity node))))
+                       (node-y node)))
+                  (radius (+ 10
+                             (* 20 (node-decay node))))
+                  (color (channel-color
+                          (aref *channel-settings* (node-channel node)))))
+              (with-pen (make-pen :fill (apply #'rgb `(,@color ,(node-intensity node)))
+                                  :stroke (apply #'rgb `(,@color 1.0)))
+                (circle wx wy radius)
                 (mapc (lambda (child)
                         (line wx wy
                               (logical-to-window-x (node-x child))
                               (logical-to-window-y (node-y child))))
-                      (node-children node)))))
+                      (node-children node)))
+              (with-pen (make-pen :fill (apply #'rgb `(,@color 1.0)))
+                (circle (+ wx (* radius (sin (node-pan node))))
+                        (- wy (* radius (cos (node-pan node))))
+                        5))))
           (node-base-nodes node-base)))
-  (with-pen (let ((color (channel-color (aref *channel-settings* selected-channel))))
-              (make-pen :fill (apply #'rgb `(,@color 0.4))
-                        :stroke (apply #'rgb `(,@color 0.8))))
-    (let ((logical-mouse-x (window-to-logical-x mouse-x))
-          (logical-mouse-y (window-to-logical-y mouse-y)))
-      (when (or (eq state :insert) (eq state :select))
-        (setq base-node (find-nearest-node node-base logical-mouse-x logical-mouse-y)))
-      (multiple-value-bind (cx cy)
-          (get-candidate-coordinate (node-x base-node)
-                                    (node-y base-node)
-                                    logical-mouse-x
-                                    logical-mouse-y)
-        (let ((wx (logical-to-window-x cx))
-              (wy (logical-to-window-y cy)))
-          (text (format nil "~S, ~S" cx cy) wx wy)
-          (case state
-            (:insert
-             (setq logical-candidate-x cx)
-             (setq logical-candidate-y cy)
-             (if (and (= cx (node-x base-node))
-                      (= cy (node-y base-node)))
-                 (setq selected-node base-node)
-                 (progn
-                   (setq selected-node nil)
-                   (with-pen (let ((color (channel-color
-                                           (aref *channel-settings* selected-channel))))
-                               (make-pen :fill (apply #'rgb `(,@color ,(node-decay base-node)))
-                                         :stroke (apply #'rgb `(,@color 1.0))))
-                     (circle wx wy (+ 10
-                                      (* 20 (node-intensity base-node)))))
-                   (with-pen (let ((color (channel-color
-                                           (aref *channel-settings* (node-channel base-node)))))
-                               (make-pen :fill (apply #'rgb `(,@color 0.4))
-                                         :stroke (apply #'rgb `(,@color 0.8))))
-                     (line wx wy
-                           (logical-to-window-x (node-x base-node))
-                           (logical-to-window-y (node-y base-node)))))))
-            (:move
-             (node-move-to selected-node cx cy))))))
+  ;; draw cursors
+  (maphash
+   (lambda (player-id cursor)
+     (with-slots ((mouse-x x)
+                  (mouse-y y)
+                  state
+                  edit-parameter
+                  logical-candidate-x
+                  logical-candidate-y
+                  base-node
+                  selected-node
+                  selected-channel)
+         cursor
+       (with-pen (let ((color (channel-color (aref *channel-settings* selected-channel))))
+                   (make-pen :fill (apply #'rgb `(,@color 0.4))
+                             :stroke (apply #'rgb `(,@color 0.8))))
+         (let ((logical-mouse-x (window-to-logical-x mouse-x))
+               (logical-mouse-y (window-to-logical-y mouse-y)))
+           (when (or (eq state :insert) (eq state :select))
+             (setq base-node (find-nearest-node node-base logical-mouse-x logical-mouse-y)))
+           (multiple-value-bind (cx cy)
+               (get-candidate-coordinate (node-x base-node)
+                                         (node-y base-node)
+                                         logical-mouse-x
+                                         logical-mouse-y)
+             (let ((wx (logical-to-window-x cx))
+                   (wy (logical-to-window-y cy)))
+               (text (format nil "P~S: ~S, ~S" player-id (mod cx 1) cy) wx wy)
+               (case state
+                 (:insert
+                  (setq logical-candidate-x cx)
+                  (setq logical-candidate-y cy)
+                  (if (and (= cx (node-x base-node))
+                           (= cy (node-y base-node)))
+                      (setq selected-node base-node)
+                      (progn
+                        (setq selected-node nil)
+                        (with-pen (let ((color (channel-color
+                                                (aref *channel-settings* selected-channel))))
+                                    (make-pen :fill (apply #'rgb `(,@color 1.0))
+                                              :stroke (apply #'rgb `(,@color 1.0))))
+                          (crosshair wx wy))
+                        (with-pen (let ((color (channel-color
+                                                (aref *channel-settings* (node-channel base-node)))))
+                                    (make-pen :fill (apply #'rgb `(,@color 0.4))
+                                              :stroke (apply #'rgb `(,@color 0.8))))
+                          (line wx wy
+                                (logical-to-window-x (node-x base-node))
+                                (logical-to-window-y (node-y base-node)))))))
+                 (:move
+                  (node-move-to selected-node cx cy))))))
 
-    (case state
-      (:insert
-       (line mouse-x (- mouse-y 4) mouse-x (+ mouse-y 6))
-       (line (- mouse-x 5) mouse-y (+ mouse-x 5) mouse-y))
-      (:select
-       (circle mouse-x mouse-y 3)))))
+         (case state
+           (:insert
+            (crosshair mouse-x mouse-y))
+           (:select
+            (circle mouse-x mouse-y 3))))))
+   cursors))
+(defun ensure-player-id (cursors player-id)
+  (unless (gethash player-id cursors)
+    (setf (gethash player-id cursors) (make-cursor)))
+  (gethash player-id cursors))
+(defun handle-mousemotion (window player-id x y yrel)
+  (with-slots (cursors) window
+    (with-slots ((mouse-x x) (mouse-y y) selected-node state edit-parameter)
+        (ensure-player-id cursors player-id)
+      (setq mouse-x x)
+      (setq mouse-y y)
+      (case state
+        (:edit
+         (let ((delta (* (- yrel) 0.01)))
+           (case edit-parameter
+             (pan (node-change-param selected-node edit-parameter delta (lambda (x) (- (mod (+ x pi) +two-pi+) pi))))
+             (otherwise (node-change-param selected-node edit-parameter delta)))))))))
 (defmethod kit.sdl2:mousemotion-event ((window tree)
                                        timestamp button-mask x y xrel yrel)
-  (with-slots (mouse-x mouse-y selected-node state) window
-    (setq mouse-x x)
-    (setq mouse-y y)
-    (case state
-      (:edit
-       (node-change-param selected-node 'intensity (* (- yrel) 0.01))
-       (node-change-param selected-node 'decay (* xrel 0.01))))))
-(defmethod kit.sdl2:mousebutton-event ((window tree) mouse-state timestamp button x y)
-  (with-slots (node-base base-node
-               logical-candidate-x logical-candidate-y
-               state selected-node selected-channel)
+  (with-slots (player-id socket side-socket) window
+    (handle-mousemotion window player-id x y yrel)
+    (pzmq:send (if (= player-id 0)
+                   socket side-socket)
+               (write-to-string (list 'handle-mousemotion player-id x y yrel)))))
+(defun handle-mousebutton (window player-id new-id mouse-state button x y)
+  (with-slots (node-base cursors)
       window
-    (case mouse-state
-      (:mousebuttondown
-       (case button
-         (1 (case state
-              (:insert
-               (if (and (= (node-x base-node) logical-candidate-x)
-                        (= (node-y base-node) logical-candidate-y))
-                   (when (node-parent base-node)
-                     (setq state :move)
-                     (setq base-node (node-parent base-node)))
-                   (let ((new-node
-                           (make-node :x logical-candidate-x
-                                      :y logical-candidate-y
-                                      :parent base-node
-                                      :channel selected-channel
-                                      :intensity (node-intensity base-node)
-                                      :decay (node-decay base-node))))
-                     (node-base-add node-base new-node)
-                     (push new-node (node-children base-node)))))
-              (:select
-               (setq selected-node base-node)
-               (setq state :edit))))
-         (3 (node-delete node-base base-node))))
-      (:mousebuttonup
-       (case state
-         (:move (setq state :insert))
-         (:edit
-          (setq selected-node nil)
-          (setq state :select)))))))
+    (with-slots (base-node
+                 logical-candidate-x logical-candidate-y
+                 state selected-node selected-channel)
+        (ensure-player-id cursors player-id)
+      (case mouse-state
+        (:mousebuttondown
+         (case button
+           (1 (case state
+                (:insert
+                 (if (and (= (node-x base-node) logical-candidate-x)
+                          (= (node-y base-node) logical-candidate-y))
+                     (when (node-parent base-node)
+                       (setq state :move)
+                       (setq base-node (node-parent base-node)))
+                     (progn
+                       (unless new-id (setq new-id (gen-id player-id)))
+                       (let ((new-node
+                               (make-node :x logical-candidate-x
+                                          :y logical-candidate-y
+                                          :parent base-node
+                                          :channel selected-channel
+                                          :intensity (node-intensity base-node)
+                                          :decay (node-decay base-node)
+                                          :pan (node-pan base-node)
+                                          :id new-id)))
+                         (node-base-add node-base new-node)))))
+                (:select
+                 (setq selected-node base-node)
+                 (setq state :edit))))
+           (3 (node-base-delete node-base base-node))))
+        (:mousebuttonup
+         (case state
+           (:move (setq state :insert))
+           (:edit
+            (setq selected-node nil)
+            (setq state :select)))))))
+  new-id)
+(defmethod kit.sdl2:mousebutton-event ((window tree) mouse-state timestamp button x y)
+  (with-slots (player-id socket side-socket) window
+    (let ((new-id (handle-mousebutton window player-id nil mouse-state button x y)))
+      (pzmq:send (if (= player-id 0)
+                     socket side-socket)
+                 (write-to-string (list 'handle-mousebutton player-id new-id mouse-state button x y))))))
+(defun handle-textinput (window player-id text)
+  (with-slots (cursors) window
+    (with-slots (selected-channel state edit-parameter) (ensure-player-id cursors player-id)
+      (case (aref text 0)
+        (#\1 (setq selected-channel 0))
+        (#\2 (setq selected-channel 1))
+        (#\i (setq state :insert))
+        (#\e
+         (setq edit-parameter 'intensity)
+         (setq state :select))
+        (#\d
+         (setq edit-parameter 'decay)
+         (setq state :select))
+        (#\p
+         (setq edit-parameter 'pan)
+         (setq state :select))))))
 (defmethod kit.sdl2:textinput-event ((window tree) ts text)
-  (with-slots (selected-channel state) window
-    (case (aref text 0)
-      (#\1 (setq selected-channel 0))
-      (#\2 (setq selected-channel 1))
-      (#\i (setq state :insert))
-      (#\e (setq state :select)))))
+  (with-slots (player-id socket side-socket) window
+    (handle-textinput window player-id text)
+    (pzmq:send (if (= player-id 0)
+                   socket side-socket)
+               (write-to-string (list 'handle-textinput player-id text)))))
+(defmethod initialize-instance :after ((window tree) &rest things &key (player-id 0))
+  (setq pzmq:*default-context* (pzmq:ctx-new))
+  (setf (slot-value window 'player-id) player-id)
+  (with-slots (socket side-socket player-id) window
+    (if (= player-id 0)
+        (progn
+          (setq socket (pzmq:socket pzmq:*default-context* :pub))
+          (pzmq:bind socket "tcp://*:2333")
+          (setq side-socket (pzmq:socket pzmq:*default-context* :pull))
+          (pzmq:bind side-socket "tcp://*:2334"))
+        (progn
+          (setq socket (pzmq:socket pzmq:*default-context* :sub))
+          (pzmq:setsockopt socket :subscribe "")
+          (pzmq:connect socket "tcp://cat-v.mit.edu:2333")
+          (setq side-socket (pzmq:socket pzmq:*default-context* :push))
+          (pzmq:connect side-socket "tcp://cat-v.mit.edu:2334")))))
+(defmethod kit.sdl2:window-event ((window tree) type ts d1 d2)
+  (with-slots (socket side-socket) window
+    (case type
+      (:close
+       (if socket
+           (pzmq:close socket)
+           (format t "Warning: socket not created?~%"))
+       (if side-socket
+           (pzmq:close side-socket)
+           (format t "Warning: side socket not created?~%"))
+       (pzmq:ctx-destroy pzmq:*default-context*)
+       (setq pzmq:*default-context* nil))))
+  (call-next-method))

@@ -1,0 +1,57 @@
+(in-package #:tree)
+;;; Setup audio
+(setf *s*
+      (make-external-server
+       "localhost"
+       :port 48800
+       ;; :server-options
+       ;; (make-server-options :device "ZoomAudioD")
+       ))
+(server-boot *s*)
+;; (server-quit *s*)
+(defparameter *echo-bus* (bus-audio :chanls 2))
+
+(proxy :echo
+       (let* ((sig (in.ar *echo-bus* 2))
+              (sig (hpf.ar sig 100))
+              (sig (freeverb2.ar (car sig) (cadr sig) :mix 1.0 :room 4)))
+         (out.ar 0 sig)))
+
+(defsynth sawsynth ((gate 1) (freq 440)
+                    (amp 0.5) (pan 0) (octave 0)
+                    (intensity 0.5) (decay 0.5)
+                    (out 0)  (reverb 0.25)
+                    (echo-out *echo-bus*))
+  (let* ((cutoff (expt 100.0 intensity))
+         (decay (* 0.2 (expt 20.0 decay)))
+         (freq (* freq (expt 2 octave)))
+         (env (env-gen.kr (env (list 1 0) (list decay) (list -2)) :gate gate :act :free))
+         (fenv (env-gen.kr (perc 0.0 0.05) :level-scale (* 3.0 freq) :level-bias freq))
+         (fenv (+ fenv (* (env-gen.kr (env (list 0 1) (list 0.5) (list 2)))
+                          (sin-osc.kr 3 0 (* 0.02 freq)))))
+         (cenv (env-gen.kr (perc 0.0 (* decay 2) 1.0 -2.0) :level-scale (* cutoff freq) :level-bias freq))
+         (sig (+
+               (pan2.ar (pulse.ar (* 1.01 fenv) 0.2) 0.2)
+               (pan2.ar (pulse.ar (* 0.99 fenv) 0.2) -0.2)))
+         (sig (rlpf.ar sig cenv))
+         (sig (pan-b2.ar (+ (car sig) (cadr sig)) pan (* amp env)))
+         (sig (apply #'decode-b2.ar (cons 2 sig))))
+    (out.ar out (* sig (- 1 reverb)))
+    (out.ar echo-out (* sig reverb))))
+(defsynth plucksynth ((gate 1) (freq 440)
+                      (amp 0.5) (pan 0) (octave 1)
+                      (intensity 0.1) (decay 0.5)
+                      (out 0) (reverb 0.1)
+                      (echo-out *echo-bus*))
+  (let* ((freq (* freq (expt 2 octave)))
+         (freq (* freq (+ 1 (sin-osc.kr 3 0 0.002))))
+         (decay (* 0.2 (expt 100.0 decay)))
+         (env (env-gen.kr (env (list 1 0) (list (min 0.3 (/ decay 16))) (list -2)) :gate gate))
+         (inp (* (lf-clip-noise.ar 2000 (/ amp 3)) env))
+         (sig (dwg-plucked.ar freq amp gate 0.1 2 (/ 500 (expt 500.0 intensity)) inp)))
+    (detect-silence.ar sig 0.001 :act :free)
+    (let* ((b (pan-b2.ar sig pan amp))
+           (panned (apply #'decode-b2.ar (cons 2 b))))
+      (out.ar out (* panned (- 1 reverb)))
+      (out.ar echo-out (* panned reverb)))))
+;; (synth :plucksynth :freq 55 :out 0 :amp 0.1)
