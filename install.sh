@@ -1,8 +1,8 @@
 #!/bin/bash
 
 brew cask install supercollider
-brew uninstall clozure-cl wget sdl2 sdl2_ttf sdl2_image
-brew install clozure-cl wget sdl2 sdl2_ttf sdl2_image
+brew uninstall clozure-cl wget sdl2 sdl2_ttf sdl2_image zeromq
+brew install clozure-cl wget sdl2 sdl2_ttf sdl2_image zeromq
 rm -rf ~/quicklisp
 wget https://beta.quicklisp.org/quicklisp.lisp
 ccl64 --load ./quicklisp.lisp \
