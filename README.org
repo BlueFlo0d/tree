@@ -1,3 +1,20 @@
 * Install and run
-Run ~install.sh~ the first time you run.
-Run ~run.sh~ later.
+Run ~./install.sh~ the first time you run.
+Run ~./run.sh~ later.
+
+Run ~./run.sh *YOUR-PLAYER-ID*~ to specify player ID (an integer). Player ID 0 is the master server.
+If you didn't provide ~*YOUR-PLAYER-ID*~, the script will ask you for it later.
+
+* Interaction
+On startup, the editor is by default in ~:INSERT~ mode. Left click to create a note. It will snap to
+the nearest coordinate with a just interval and simple time value to the nearest existing note.
+Right click to delete a note and all its descendants.
+
+Use number key to switch instruments. Different instruments are represented in different colors.
+
+Use the followings key to switch to ~:EDIT~ mode.
+- ~e~ :: editing parameter ~INTENSITY~
+- ~p~ :: editing parameter ~PAN~
+- ~d~ :: editing parameter ~DECAY~
+In parameter editing mode, you can click on one note and drag up or down to adjust the selected parameter.
+Use key ~i~ to switch back to ~:INSERT~ mode.
