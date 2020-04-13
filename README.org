@@ -16,5 +16,6 @@ Use the followings key to switch to ~:EDIT~ mode.
 - ~e~ :: editing parameter ~INTENSITY~
 - ~p~ :: editing parameter ~PAN~
 - ~d~ :: editing parameter ~DECAY~
+- ~r~ :: editing parameter ~REVERB~
 In parameter editing mode, you can click on one note and drag up or down to adjust the selected parameter.
 Use key ~i~ to switch back to ~:INSERT~ mode.

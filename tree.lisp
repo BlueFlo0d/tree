@@ -26,6 +26,7 @@
   (intensity 0.2)
   (decay 0.2)
   (pan 0.0)
+  (reverb 0.5)
   (id '(0 . 0)))
 (defstruct node-base
   (nodes nil)
@@ -79,12 +80,13 @@
               (node-channel n)
               (node-intensity n)
               (node-decay n)
-              (node-pan n)))
+              (node-pan n)
+              (node-reverb n)))
            (node-base-nodes node-base))))
 (defun node-base-load (list)
   (let ((node-base (make-node-base)))
     (mapc (lambda (item)
-            (destructuring-bind (id parent-id x y channel intensity decay pan) item
+            (destructuring-bind (id parent-id x y channel intensity decay pan reverb) item
               (declare (ignore parent-id))
               (let ((new-node (make-node
                                :id id
@@ -93,7 +95,8 @@
                                :channel channel
                                :intensity intensity
                                :decay decay
-                               :pan pan)))
+                               :pan pan
+                               :reverb reverb)))
                 (push new-node (node-base-nodes node-base))
                 (setf (gethash id (node-base-idtable node-base)) new-node))))
           list)
@@ -269,7 +272,8 @@
                      :amp (channel-amp channel)
                      :pan (/ (node-pan node) pi)
                      :intensity (node-intensity node)
-                     :decay (node-decay node))))
+                     :decay (node-decay node)
+                     :reverb (node-reverb node))))
           (find-swept-nodes node-base
                             (window-to-logical-x tape-x)
                             (window-to-logical-x new-tape-x)))
@@ -295,10 +299,12 @@
                               (logical-to-window-x (node-x child))
                               (logical-to-window-y (node-y child))))
                       (node-children node)))
-              (with-pen (make-pen :fill (apply #'rgb `(,@color 1.0)))
-                (circle (+ wx (* radius (sin (node-pan node))))
-                        (- wy (* radius (cos (node-pan node))))
-                        5))))
+              (let* ((reverb (node-reverb node))
+                     (radius (+ (* reverb 5) (* (- 1 reverb) radius))))
+                (with-pen (make-pen :fill (apply #'rgb `(,@color 1.0)))
+                  (circle (+ wx (* radius (sin (node-pan node))))
+                          (- wy (* radius (cos (node-pan node))))
+                          5)))))
           (node-base-nodes node-base)))
   ;; draw cursors
   (maphash
@@ -408,6 +414,7 @@
                                           :intensity (node-intensity base-node)
                                           :decay (node-decay base-node)
                                           :pan (node-pan base-node)
+                                          :reverb (node-reverb base-node)
                                           :id new-id)))
                          (node-base-add node-base new-node)))))
                 (:select
@@ -442,6 +449,9 @@
          (setq state :select))
         (#\p
          (setq edit-parameter 'pan)
+         (setq state :select))
+        (#\r
+         (setq edit-parameter 'reverb)
          (setq state :select))))))
 (defmethod kit.sdl2:textinput-event ((window tree) ts text)
   (with-slots (player-id socket side-socket) window

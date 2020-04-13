@@ -1,8 +1,5 @@
 (pushnew (ccl:current-directory) ql:*local-project-directories*)
 (declaim (optimize (debug 3)))
-(print 'here)
-(print 'here)
-(print 'here)
 (unless (boundp '*cli-player-id*)
   (format t "Please specifiy player ID:")
   (setq *cli-player-id* (read))
