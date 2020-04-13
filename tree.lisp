@@ -27,6 +27,7 @@
   (decay 0.2)
   (pan 0.0)
   (reverb 0.5)
+  (continuation nil)
   (id '(0 . 0)))
 (defstruct node-base
   (nodes nil)
@@ -52,7 +53,7 @@
         node)
   node-base)
 (defun node-base-delete (node-base node)
-  (when (parents node) ;; don't delete root node!
+  (when (node-parent node) ;; don't delete root node!
     (symbol-macrolet ((parent-place (node-children (node-parent node)))
                       (base-place (node-base-nodes node-base)))
       (setf parent-place (delete node parent-place))
@@ -81,12 +82,13 @@
               (node-intensity n)
               (node-decay n)
               (node-pan n)
-              (node-reverb n)))
+              (node-reverb n)
+              (node-continuation n)))
            (node-base-nodes node-base))))
 (defun node-base-load (list)
   (let ((node-base (make-node-base)))
     (mapc (lambda (item)
-            (destructuring-bind (id parent-id x y channel intensity decay pan reverb) item
+            (destructuring-bind (id parent-id x y channel intensity decay pan reverb continuation) item
               (declare (ignore parent-id))
               (let ((new-node (make-node
                                :id id
@@ -96,7 +98,8 @@
                                :intensity intensity
                                :decay decay
                                :pan pan
-                               :reverb reverb)))
+                               :reverb reverb
+                               :continuation continuation)))
                 (push new-node (node-base-nodes node-base))
                 (setf (gethash id (node-base-idtable node-base)) new-node))))
           list)
@@ -198,6 +201,10 @@
   (selected-node)
   (selected-channel 0))
 (defparameter *current-player-id* 0)
+(defstruct activation
+  (synth)
+  (start)
+  (end))
 (defsketch tree
     ((title "Just Tree")
      (width *window-width*)
@@ -209,6 +216,7 @@
       (let ((new-cursors (make-hash-table)))
         (setf (gethash 0 new-cursors) (make-cursor))
         new-cursors))
+     (activations nil)
      (player-id 0)
      (socket)
      (side-socket))
