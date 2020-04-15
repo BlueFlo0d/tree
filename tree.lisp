@@ -11,7 +11,10 @@
   `#(,(make-channel)
      ,(make-channel
        :synth 'plucksynth
-       :color '(0.5 0.0 0.9))))
+       :color '(0.5 0.0 0.9))
+     ,(make-channel
+       :synth 'rest
+       :color '(0.5 0.5 0.5))))
 ;;; UI
 (defparameter last-gen-id 0)
 (defun gen-id (player-id)
@@ -27,6 +30,7 @@
   (decay 0.2)
   (pan 0.0)
   (reverb 0.5)
+  (mutate 0.0)
   (continuation nil)
   (mute nil)
   (id '(0 . 0)))
@@ -83,13 +87,27 @@
              (node-decay n)
              (node-pan n)
              (node-reverb n)
+             (node-mutate n)
              (node-continuation n)
              (node-mute n)))
           (node-base-nodes node-base)))
 (defun node-base-load (list)
   (let ((node-base (make-node-base)))
     (mapc (lambda (item)
-            (destructuring-bind (id parent-id x y channel intensity decay pan reverb continuation mute) item
+            (destructuring-bind
+                (id
+                 parent-id
+                 x
+                 y
+                 channel
+                 intensity
+                 decay
+                 pan
+                 reverb
+                 mutate
+                 continuation
+                 mute)
+                item
               (declare (ignore parent-id))
               (let ((new-node (make-node
                                :id id
@@ -226,6 +244,7 @@
         (setf (gethash 0 new-cursors) (make-cursor))
         new-cursors))
      (activations nil)
+     (synths nil)
      (player-id 0)
      (socket)
      (side-socket))
@@ -279,22 +298,34 @@
           do (let ((wy (logical-to-window-y i)))
                (line 0 wy *window-width* wy))))
   ;; tape
-  (let ((new-tape-x
-          (* width (mod (/ (local-time:timestamp-difference (local-time:now) initial-time) 12.0) 1.0))))
+  (let* ((new-tape-x
+           (* width (mod (/ (local-time:timestamp-difference (local-time:now) initial-time) 12.0) 1.0)))
+         (logical-tape-x (window-to-logical-x new-tape-x)))
     (mapc (lambda (node)
             (let ((channel (aref *channel-settings* (node-channel node))))
               (unless (node-mute node)
-                (synth (channel-synth
-                        channel)
-                       :freq (* (node-y node) 55.0)
-                       :amp (channel-amp channel)
-                       :pan (/ (node-pan node) pi)
-                       :intensity (node-intensity node)
-                       :decay (node-decay node)
-                       :reverb (node-reverb node)))))
+                (let ((synth  (channel-synth
+                               channel)))
+                  (case synth
+                    (rest (setq synths (delete-if-not #'is-playing-p synths))
+                     (mapc #'release synths)
+                     (setq synths nil))
+                    (otherwise
+                     (push (synth synth
+                                  :freq (* (node-y node) 55.0)
+                                  :amp (channel-amp channel)
+                                  :pan (/ (node-pan node) pi)
+                                  :intensity (node-intensity node)
+                                  :decay (node-decay node)
+                                  :reverb (node-reverb node)
+                                  :mutate (node-mutate node))
+                           synths)))))))
           (find-swept-nodes node-base
                             (window-to-logical-x tape-x)
                             (window-to-logical-x new-tape-x)))
+    (when (> logical-tape-x 7.9)
+      ;; GC synths
+      (setq synths (delete-if-not #'is-playing-p synths)))
     (setq tape-x new-tape-x))
   (with-pen (make-pen :stroke (rgb 0 0.5 0.9 0.4))
     (line tape-x 0 tape-x height))
@@ -310,18 +341,23 @@
                   (color (node-color-list node)))
               (with-pen (make-pen :fill (apply #'rgb `(,@color ,(node-intensity node)))
                                   :stroke (apply #'rgb `(,@color 1.0)))
-                (circle wx wy radius)
+                (case (channel-synth (aref *channel-settings* (node-channel node)))
+                  (rest (line (- wx 5) (- wy 5) (+ wx 5) (+ wy 5))
+                   (line (+ wx 5) (- wy 5) (- wx 5) (+ wy 5)))
+                  (otherwise
+                   (star (max 12 (truncate (* 2 (sqrt radius)))) wx wy radius
+                         (* radius (+ 1 (/ (node-mutate node) 3))))
+                   (let* ((reverb (node-reverb node))
+                          (radius (+ (* reverb 5) (* (- 1 reverb) radius))))
+                     (with-pen (make-pen :fill (apply #'rgb `(,@color 1.0)))
+                       (circle (+ wx (* radius (sin (node-pan node))))
+                               (- wy (* radius (cos (node-pan node))))
+                               5)))))
                 (mapc (lambda (child)
                         (line wx wy
                               (logical-to-window-x (node-x child))
                               (logical-to-window-y (node-y child))))
-                      (node-children node)))
-              (let* ((reverb (node-reverb node))
-                     (radius (+ (* reverb 5) (* (- 1 reverb) radius))))
-                (with-pen (make-pen :fill (apply #'rgb `(,@color 1.0)))
-                  (circle (+ wx (* radius (sin (node-pan node))))
-                          (- wy (* radius (cos (node-pan node))))
-                          5)))))
+                      (node-children node)))))
           (node-base-nodes node-base)))
   ;; draw cursors
   (maphash
@@ -432,6 +468,7 @@
                                           :decay (node-decay base-node)
                                           :pan (node-pan base-node)
                                           :reverb (node-reverb base-node)
+                                          :mutate (node-mutate base-node)
                                           :mute (node-mute base-node)
                                           :id new-id)))
                          (node-base-add node-base new-node)))))
@@ -465,6 +502,8 @@
       (case (aref text 0)
         (#\1 (setq selected-channel 0))
         (#\2 (setq selected-channel 1))
+        (#\h (setq state :insert)
+         (setq selected-channel 2))
         (#\i (setq state :insert))
         (#\e
          (setq edit-parameter 'intensity)
@@ -477,6 +516,9 @@
          (setq state :select))
         (#\r
          (setq edit-parameter 'reverb)
+         (setq state :select))
+        (#\m
+         (setq edit-parameter 'mutate)
          (setq state :select))))))
 (defmethod kit.sdl2:textinput-event ((window tree) ts text)
   (with-slots (player-id socket side-socket) window

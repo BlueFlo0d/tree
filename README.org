@@ -8,7 +8,7 @@ If you didn't provide ~*YOUR-PLAYER-ID*~, the script will ask you for it later.
 * Interaction
 On startup, the editor is by default in ~:INSERT~ mode. Left click to create a note. It will snap to
 the nearest coordinate with a just interval and simple time value to the nearest existing note.
-Right click to delete a note and all its descendants.
+Right click to delete a note and all its descendants. Drag a note to move it (with its descendants).
 
 Use number key to switch instruments. Different instruments are represented in different colors.
 
@@ -17,5 +17,9 @@ Use the followings key to switch to ~:EDIT~ mode.
 - ~p~ :: editing parameter ~PAN~
 - ~d~ :: editing parameter ~DECAY~
 - ~r~ :: editing parameter ~REVERB~
+- ~m~ :: editing parameter ~MUTATE~
 In parameter editing mode, you can click on one note and drag up or down to adjust the selected parameter.
-Use key ~i~ to switch back to ~:INSERT~ mode. Right click on a node to mute/unmute it (and all its descendants).
+Use key ~i~ to switch back to ~:INSERT~ mode. Right click on a note to mute/unmute it (and all its descendants).
+
+Use ~h~ key to switch to rest insertion mode. You can insert a ~REST~ note like regular note, which silence all the
+current active voices.
