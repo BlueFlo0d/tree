@@ -4,9 +4,11 @@
       (make-external-server
        "localhost"
        :port 48800
-       ;; :server-options
-       ;; (make-server-options :device "ZoomAudioD")
-       ))
+       :server-options
+       (make-server-options
+        ;;:device "Multi-Output Device"
+        :num-input-bus 0
+        )))
 (server-boot *s*)
 ;; (server-quit *s*)
 (defparameter *echo-bus* (bus-audio :chanls 2))
@@ -16,7 +18,7 @@
 (proxy :master
        (let* ((sig (in.ar *master-bus* 2))
               (sig (compander.ar sig sig 0.3 1.0 0.7 0.01 0.1 :mul 1.3))
-              (sig (limiter.ar sig)))
+              (sig (clip.ar (limiter.ar sig) -1 1)))
          (out.ar 0 sig)))
 (proxy :echo
        (let* ((sig (in.ar *echo-bus* 2))
@@ -54,7 +56,7 @@
          (sig (rlpf.ar sig cenv))
          (sig (/ (sin (* sig amp env)) (+ 0.3 (* 9 mutate))))
          (sig (* sig gate (+ 1 (* intensity mutate (saw.ar (/ fenv 4)))))))
-    (out.ar *saw-bus* (* sig (- 1 reverb)))
+    (out.ar *saw-bus* (* sig (- 1.0 reverb)))
     (out.ar *echo-bus* (* sig reverb))))
 (defsynth plucksynth ((gate 1) (freq 440)
                       (amp 0.5) (pan 0) (octave 1)
@@ -78,19 +80,32 @@
       (out.ar *pluck-bus* (* panned (- 1 reverb)))
       (out.ar *echo-bus* (* panned reverb)))))
 (defsynth percsynth ((gate 1) (freq 440)
-                     (amp 0.5) (pan 0) (octave 1)
+                     (amp 0.2) (pan 0) (octave 1)
                      (intensity 0.1) (decay 0.5) (mutate 0.0)
                      (reverb 0.1) (lfo 0))
   (let* ((env (env-gen.kr (env (list 1 1 0) (list 0 (/ decay 16)) (list 0 -2))
                           :gate (* gate (impulse.kr lfo 0))))
          (fenv (env-gen.kr (perc 0.0 0.01)))
-         (inp (* (+ (sin-osc.ar (+ 40 (* fenv 1000))) (white-noise.ar (/ amp 3))) env))
-         (sig (membrane-hexagon.ar inp 0.01 0.99999)))
-    (detect-silence.ar sig 0.001 :act :free)
-    (let* ((b (pan-b2.ar sig pan amp))
+         (amp (* amp 0.3 (expt 50.0 intensity)))
+         (tension (* freq 0.0015))
+         (tension (* tension tension))
+         (inp (* (+ (* (sin-osc.ar (+ 40 (* fenv 5000))) (- 1.0 intensity))
+                    (* (white-noise.ar) intensity))
+                 env))
+         (sig (membrane-hexagon.ar inp tension (- 1 (/ 1 (+ 10 (expt 10000 (expt decay 0.3))))) amp))
+         (sig (/ (clip.ar (+ (* mutate (sin sig))
+                             (* (- 1.0 mutate) sig))
+                          -1 1)
+                 (+ 0.3 (* 0.3 intensity)))))
+    (detect-silence.ar sig 0.0001 :act :free)
+    (let* ((b (pan-b2.ar sig pan))
            (panned (apply #'decode-b2.ar (cons 2 b)))
-           (panned (/ (sin panned) (+ 1 (* 24 mutate)))))
+           (panned (compander.ar panned panned 0.3 1.0 0.3 0.07 0.1))
+           (panned (clip.ar panned -1 1)))
       (out.ar *pluck-bus* (* panned (- 1 reverb)))
       (out.ar *echo-bus* (* panned reverb)))))
-(setq test-synth (synth :plucksynth :freq 220.0 :amp 0.2 :pan 0.0d0 :intensity 1.0 :decay 1.0 :reverb 0.0))
-(release test-synth)
+(setq test-synth (synth 'percsynth :freq 55.0 :amp 0.2 :pan 0.0d0 :intensity 0.2 :decay 0.2 :reverb 0.0 :mutate 0.0))
+
+;; (release test-synth)
+(free test-synth)
+(server-query-all-nodes)

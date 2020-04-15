@@ -14,7 +14,10 @@
        :color '(0.5 0.0 0.9))
      ,(make-channel
        :synth 'rest
-       :color '(0.5 0.5 0.5))))
+       :color '(0.5 0.5 0.5))
+     ,(make-channel
+       :synth 'percsynth
+       :color '(1.0 0.2 0.2))))
 ;;; UI
 (defparameter last-gen-id 0)
 (defun gen-id (player-id)
@@ -413,7 +416,26 @@
             (crosshair (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y)))
            (:select
             (circle (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y) 3))))))
-   cursors))
+   cursors)
+  ;; draw hint
+  (let ((node (cursor-selected-node (gethash player-id cursors))))
+    (when node
+      (let ((channel (aref *channel-settings* (node-channel node))))
+        (unless (node-mute node)
+          (let ((synth  (channel-synth
+                         channel)))
+            (case synth
+              (rest (text "REST" 0 0))
+              (otherwise
+               (text (write-to-string (list synth
+                                            :freq (* (node-y node) 55.0)
+                                            :amp (channel-amp channel)
+                                            :pan (/ (node-pan node) pi)
+                                            :intensity (node-intensity node)
+                                            :decay (node-decay node)
+                                            :reverb (node-reverb node)
+                                            :mutate (node-mutate node)))
+                     0 0)))))))))
 (defun ensure-player-id (cursors player-id)
   (unless (gethash player-id cursors)
     (setf (gethash player-id cursors) (make-cursor)))
@@ -502,6 +524,7 @@
       (case (aref text 0)
         (#\1 (setq selected-channel 0))
         (#\2 (setq selected-channel 1))
+        (#\3 (setq selected-channel 3))
         (#\h (setq state :insert)
          (setq selected-channel 2))
         (#\i (setq state :insert))

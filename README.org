@@ -23,3 +23,9 @@ Use key ~i~ to switch back to ~:INSERT~ mode. Right click on a note to mute/unmu
 
 Use ~h~ key to switch to rest insertion mode. You can insert a ~REST~ note like regular note, which silence all the
 current active voices.
+
+* Avaliable instruments
+
+1. A substractive synth.
+2. A physics modeling synth. Simulate string instruments (pluck at short decay and bow at long decay).
+3. A physics modeling synth. Simulate drums.
