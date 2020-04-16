@@ -6,7 +6,7 @@
        :port 48800
        :server-options
        (make-server-options
-        ;;:device "Multi-Output Device"
+        ;;:device "ZoomAudioD"
         :num-input-bus 0
         )))
 (server-boot *s*)

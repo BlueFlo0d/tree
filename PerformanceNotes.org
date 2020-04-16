@@ -1,0 +1,41 @@
+* Overview
+The performace for April will be consisted of the following sections.
+1. Intro
+   + Sparse, high reverb sound
+   + Timpani like sound (Inst. 1 with low intensity and Inst. 3 with long decay) in the bass.
+   + Sparse pluck sound as melody. Low intensity and decay. High tonality.
+   + Node for tonality: Use notes with Y coordinate makes up of ~2,3,5~.
+     - ~3,3/2~ for ~sol~, ~6/5,12/5~ for ~meh~, ~9/10,9/5~ for ~teh~.
+     - Use other note closed to the notes above and resolve to them.
+   + ~0~ mutation.
+2. Build-up (atonalize)
+   + Gradually increase intensity and mutation.
+   + Add notes. At first only tonal notes, then go dense and atonal.
+   + Interleave high reverb and low reverb sound.
+   + Transition to section ~3~
+     - At the end of this section, morph to high reverb, mutation and long decay sound
+     - Meanwhile, work on building a 4 on the floor Trancy bassline+drum. It can be muted when building,
+       then enabled with low intensity, hiding in other intense sound and ready to pop out as the skeleton
+       for section ~3~
+3. Drop
+   + Let section ~2~ go to climax in the middle of the 32-bar loop, and then cut everything except the bassline,
+     increase the intensity of the bassline using the remaining half of the loop, then let bass drum come in at the
+     beginning of the next loop.
+   + Use Inst. 1 to create a tonal melody. Use small variation of parameters within melody.
+   + Free to add other stuff to increase intensity, but use 2x32-bar loop as a period. Build climax at the end of every
+     2x32-bar loop and ready to delete any additionall stuff and reset parameters at the beginning of each 2x32-bar loop.
+4. Drum solo
+   + Abrupt cut everything except the first note with a long reverb Timpani like sound.
+   + Free to add Inst. 3 notes, explore rhythms.
+     Start with unrhythmic sound clusters and then morph to rhythmic material.
+   + After some Inst. 3 solo, start to add bass and Inst. 2 high mutate melody.
+5. Second Drop
+   + Mute the bass drum at the end of section ~4~, increase intensity and decay, then let bass drum in.
+   + Similiar to section ~3~, but now on free rhythm rather than 4 on the floor.
+   + Do whatever you want.
+6. Recap
+   + Cut every note except the drum, add reverb and decay to make it Timpani like.
+   + Reproduce the sound in section ~1~.
+   + Cut Timpani like sound, let pluck go for a while.
+   + End on a huge stacked chord with one Timpani like sound in the bass.
+       
