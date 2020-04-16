@@ -11,7 +11,8 @@ ccl64 --load ./quicklisp.lisp \
       --eval '(quit)'
 wget https://common-lisp.net/project/asdf/archives/asdf.lisp
 cp asdf.lisp `brew list clozure-cl | grep asdf.lisp`
-wget https://github.com/supercollider/sc3-plugins/releases/download/Version-3.11.0-rc1/sc3-plugins-3.11.0-rc1-macOS-signed.zip
+wget https://github.com/supercollider/sc3-plugins/releases/download/Version-3.11.0-rc2/sc3-plugins-3.11.0-rc2-macOS-signed.zip
 sudo mkdir -p ~/Library/Application\ Support/SuperCollider/Extensions
 unzip sc3-plugins-3.11.0-rc1-macOS-signed.zip -d "~/Library/Application Support/SuperCollider/Extensions"
+mv ~/Library/Application\ Support/SuperCollider/Extensions/sc3-plugins-3.11.0-rc2-macOS-signed/* ~/Library/Application\ Support/SuperCollider/Extensions/
 exec ./run.sh
