@@ -7,4 +7,5 @@
 
 (ql:quickload "tree")
 (in-package :tree)
-(make-instance 'tree :player-id cl-user::*cli-player-id*)
+(defvar test-tree)
+(setq test-tree (make-instance 'tree :player-id cl-user::*cli-player-id*))
