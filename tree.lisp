@@ -72,8 +72,7 @@
       (setf base-place
             (delete-if (lambda (node)
                          (unless (or (node-parent node)
-                                     (and (= (node-x node) 0)
-                                          (= (node-y node) 1)))
+                                     (equal (node-id node) (cons 0 0)))
                            (remhash (node-id node) (node-base-idtable node-base))))
                        base-place)))))
 (defun node-base-dump (node-base)
@@ -557,6 +556,7 @@
   (setq pzmq:*default-context* (pzmq:ctx-new))
   (setf (slot-value window 'player-id) player-id)
   (sdl2:hide-cursor)
+  (setq last-gen-id 0)
   (with-slots (socket side-socket player-id width height title) window
     (setq title (format nil "Just Tree (Player ~S)" player-id))
     (sdl2:set-window-title (kit.sdl2:sdl-window window) title)
