@@ -60,21 +60,26 @@
   (setf (gethash (node-id node) (node-base-idtable node-base))
         node)
   node-base)
+(defun node-base-purge (node-base)
+  (symbol-macrolet ((base-place (node-base-nodes node-base)))
+    (setf base-place
+          (delete-if (lambda (node)
+                       (unless (or (node-parent node)
+                                   (equal (node-id node) (cons 0 0)))
+                         (remhash (node-id node) (node-base-idtable node-base))))
+                     base-place))))
+(defmacro with-node-subtree ((node) &rest body)
+  `(labels ((process-node (node)
+              ,@body
+              (mapc #'process-node (node-children node))))
+     (process-node ,node)))
 (defun node-base-delete (node-base node)
   (when (node-parent node) ;; don't delete root node!
-    (symbol-macrolet ((parent-place (node-children (node-parent node)))
-                      (base-place (node-base-nodes node-base)))
+    (symbol-macrolet ((parent-place (node-children (node-parent node))))
       (setf parent-place (delete node parent-place))
-      (labels ((process-node (node)
-                 (setf (node-parent node) nil)
-                 (mapc #'process-node (node-children node))))
-        (process-node node))
-      (setf base-place
-            (delete-if (lambda (node)
-                         (unless (or (node-parent node)
-                                     (equal (node-id node) (cons 0 0)))
-                           (remhash (node-id node) (node-base-idtable node-base))))
-                       base-place)))))
+      (with-node-subtree (node)
+                         (setf (node-parent node) nil)))
+    (node-base-purge node-base)))
 (defun node-base-dump (node-base)
   (mapcar (lambda (n)
             (list
@@ -138,11 +143,9 @@
 (defun node-move-to (node target-x target-y)
   (let ((delta-x (- target-x (node-x node)))
         (delta-y (/ target-y (node-y node))))
-    (labels ((process-node (node)
-               (incf (node-x node) delta-x)
-               (setf (node-y node) (* delta-y (node-y node)))
-               (mapc #'process-node (node-children node))))
-      (process-node node))))
+    (with-node-subtree (node)
+                       (incf (node-x node) delta-x)
+                       (setf (node-y node) (* delta-y (node-y node))))))
 (defun trim-value (value)
   (if (> value 1.0)
       1.0
@@ -151,11 +154,9 @@
           value)))
 (defun node-change-param (node param delta &optional (trim-function
                                                       #'trim-value))
-  (labels ((process-node (node)
-             (setf (slot-value node param)
-                   (funcall trim-function (+ delta (slot-value node param))))
-             (mapc #'process-node (node-children node))))
-    (process-node node)))
+  (with-node-subtree (node)
+                     (setf (slot-value node param)
+                           (funcall trim-function (+ delta (slot-value node param))))))
 
 (defun find-nearest-node (node-base x y)
   (let ((nearest-distance (+ *logical-width* *logical-height*))
@@ -259,6 +260,7 @@
         (let ((current-time (local-time:now)))
           (when (> (local-time:timestamp-difference current-time *last-broadcast-time*) 1)
             (setq *last-broadcast-time* current-time)
+            (node-base-purge node-base)
             (pzmq:send socket (write-to-string (cons initial-time (node-base-dump node-base))))))
         (handler-case
             (loop for i from 1
@@ -499,11 +501,9 @@
            (3 (case state
                 (:insert (node-base-delete node-base base-node))
                 (:select (let ((newval (not (node-mute base-node))))
-                           (labels ((process-node (node)
-                                      (setf (node-mute node)
-                                            newval)
-                                      (mapc #'process-node (node-children node))))
-                             (process-node base-node))))))))
+                           (with-node-subtree (base-node)
+                                              (setf (node-mute node)
+                                                    newval))))))))
         (:mousebuttonup
          (case state
            (:move (setq state :insert))
