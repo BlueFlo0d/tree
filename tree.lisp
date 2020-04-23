@@ -69,10 +69,13 @@
                          (remhash (node-id node) (node-base-idtable node-base))))
                      base-place))))
 (defmacro with-node-subtree ((node) &rest body)
-  `(labels ((process-node (node)
-              ,@body
-              (mapc #'process-node (node-children node))))
-     (process-node ,node)))
+  `(let ((processed-nodes (make-hash-table)))
+     (labels ((process-node (node)
+                (unless (nth-value 1 (gethash node processed-nodes))
+                  ,@body
+                  (setf (gethash node processed-nodes) t)
+                  (mapc #'process-node (node-children node)))))
+       (process-node ,node))))
 (defun node-base-delete (node-base node)
   (when (node-parent node) ;; don't delete root node!
     (symbol-macrolet ((parent-place (node-children (node-parent node))))
@@ -416,7 +419,9 @@
            (:insert
             (crosshair (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y)))
            (:select
-            (circle (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y) 3))))))
+            (circle (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y) 3))
+           (:edit
+            (circle (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y) 5))))))
    cursors)
   ;; draw hint
   (let ((node (cursor-selected-node (gethash player-id cursors))))
@@ -497,7 +502,8 @@
                          (node-base-add node-base new-node)))))
                 (:select
                  (setq selected-node base-node)
-                 (setq state :edit))))
+                 (setq state :edit)
+                 (sdl2:set-relative-mouse-mode 1))))
            (3 (case state
                 (:insert (node-base-delete node-base base-node))
                 (:select (let ((newval (not (node-mute base-node))))
@@ -509,6 +515,7 @@
            (:move (setq state :insert))
            (:edit
             (setq selected-node nil)
+            (sdl2:set-relative-mouse-mode 0)
             (setq state :select)))))))
   new-id)
 (defmethod kit.sdl2:mousebutton-event ((window tree) mouse-state timestamp button x y)
