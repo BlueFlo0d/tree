@@ -366,12 +366,17 @@
                        (circle (+ wx (* radius (sin (node-pan node))))
                                (- wy (* radius (cos (node-pan node))))
                                5)))))
+                (setf (node-children node)
+                      (delete-if (lambda (c)
+                                   (when (node-duplicate-p node c)
+                                     (setf (node-base-nodes node-base)
+                                           (delete c (node-base-nodes node-base)))
+                                     t))
+                                 (node-children node)))
                 (mapc (lambda (child)
-                        (if (node-duplicate-p node child)
-                            (format t "Warning: duplicate node ~S ~S" node child)
-                            (line wx wy
-                                  (logical-to-window-x (node-x child))
-                                  (logical-to-window-y (node-y child)))))
+                        (line wx wy
+                              (logical-to-window-x (node-x child))
+                              (logical-to-window-y (node-y child))))
                       (node-children node)))))
           (node-base-nodes node-base)))
   ;; draw cursors
