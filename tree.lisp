@@ -60,8 +60,13 @@
   (setf (gethash (node-id node) (node-base-idtable node-base))
         node)
   node-base)
+(defun node-duplicate-p (a b)
+  (and (= (node-x a) (node-x b))
+       (= (node-y a) (node-y b))))
 (defun node-base-purge (node-base)
   (symbol-macrolet ((base-place (node-base-nodes node-base)))
+    (setf base-place
+          (delete-duplicates base-place :test #'node-duplicate-p))
     (setf base-place
           (delete-if (lambda (node)
                        (unless (or (node-parent node)
@@ -362,9 +367,11 @@
                                (- wy (* radius (cos (node-pan node))))
                                5)))))
                 (mapc (lambda (child)
-                        (line wx wy
-                              (logical-to-window-x (node-x child))
-                              (logical-to-window-y (node-y child))))
+                        (if (node-duplicate-p node child)
+                            (format t "Warning: duplicate node ~S ~S" node child)
+                            (line wx wy
+                                  (logical-to-window-x (node-x child))
+                                  (logical-to-window-y (node-y child)))))
                       (node-children node)))))
           (node-base-nodes node-base)))
   ;; draw cursors
