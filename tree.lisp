@@ -75,7 +75,8 @@
                                 (and (node-parent node)
                                      (member (node-parent node) base-place))
                                 (equal (node-id node) (cons 0 0)))
-                         (remhash (node-id node) (node-base-idtable node-base))))
+                         (remhash (node-id node) (node-base-idtable node-base))
+                         t))
                      base-place))))
 (defmacro with-node-subtree ((node) &rest body)
   `(let ((processed-nodes (make-hash-table)))
@@ -154,11 +155,12 @@
           list)
     node-base))
 (defun node-move-to (node target-x target-y)
-  (let ((delta-x (- target-x (node-x node)))
-        (delta-y (/ target-y (node-y node))))
-    (with-node-subtree (node)
-                       (incf (node-x node) delta-x)
-                       (setf (node-y node) (* delta-y (node-y node))))))
+  (when node
+    (let ((delta-x (- target-x (node-x node)))
+          (delta-y (/ target-y (node-y node))))
+      (with-node-subtree (node)
+                         (incf (node-x node) delta-x)
+                         (setf (node-y node) (* delta-y (node-y node)))))))
 (defun trim-value (value)
   (if (> value 1.0)
       1.0
@@ -167,9 +169,10 @@
           value)))
 (defun node-change-param (node param delta &optional (trim-function
                                                       #'trim-value))
-  (with-node-subtree (node)
-                     (setf (slot-value node param)
-                           (funcall trim-function (+ delta (slot-value node param))))))
+  (when node
+    (with-node-subtree (node)
+                       (setf (slot-value node param)
+                             (funcall trim-function (+ delta (slot-value node param)))))))
 
 (defun find-nearest-node (node-base x y)
   (let ((nearest-distance (+ *logical-width* *logical-height*))
