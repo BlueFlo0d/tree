@@ -129,6 +129,7 @@
                                :pan pan
                                :reverb reverb
                                :continuation continuation
+                               :mutate mutate
                                :mute mute)))
                 (push new-node (node-base-nodes node-base))
                 (setf (gethash id (node-base-idtable node-base)) new-node))))
@@ -346,7 +347,7 @@
                   (radius (+ 10
                              (* 20 (node-decay node))))
                   (color (node-color-list node)))
-              (with-pen (make-pen :fill (apply #'rgb `(,@color ,(node-intensity node)))
+              (with-pen (make-pen :fill (apply #'rgb `(,@color ,(* 0.8 (node-intensity node))))
                                   :stroke (apply #'rgb `(,@color 1.0)))
                 (case (channel-synth (aref *channel-settings* (node-channel node)))
                   (rest (line (- wx 5) (- wy 5) (+ wx 5) (+ wy 5))
