@@ -240,7 +240,6 @@
   (base-node)
   (selected-node)
   (selected-channel 0))
-(defparameter *current-player-id* 0)
 (defstruct activation
   (synth)
   (start)
@@ -264,14 +263,14 @@
         new-cursors))
      (activations nil)
      (synths nil)
-     (player-id 0)
+     (player-id 'root)
      (socket)
      (side-socket))
   ;; (setq *window-width* width)
   ;; (setq *window-height* height)
   (background (gray 0.9))
   ;; network
-  (if (= player-id 0)
+  (if (eq player-id 'root)
       (progn
         (let ((current-time (local-time:now)))
           (when (> (local-time:timestamp-difference current-time *last-broadcast-time*) 1)
@@ -305,7 +304,7 @@
                                  (setq selected-node (gethash (node-id selected-node) (node-base-idtable node-base))))))
                            cursors))
                          (symbol
-                          (when (not (= (cadr list) player-id))
+                          (when (not (eq (cadr list) player-id))
                             (apply (symbol-function (car list))
                                    (cons sketch::instance (cdr list))))))))
           (pzmq:eagain ()))))
@@ -324,22 +323,23 @@
     (mapc (lambda (node)
             (let ((channel (aref *channel-settings* (node-channel node))))
               (unless (node-mute node)
-                (let ((synth  (channel-synth
-                               channel)))
-                  (case synth
-                    (rest (setq synths (delete-if-not #'is-playing-p synths))
-                     (mapc #'release synths)
-                     (setq synths nil))
-                    (otherwise
-                     (push (synth synth
-                                  :freq (* (node-y node) 55.0)
-                                  :amp (channel-amp channel)
-                                  :pan (/ (node-pan node) pi)
-                                  :intensity (node-intensity node)
-                                  :decay (node-decay node)
-                                  :reverb (node-reverb node)
-                                  :mutate (node-mutate node))
-                           synths)))))))
+                (when (eq player-id 'audio)
+                  (let ((synth  (channel-synth
+                                 channel)))
+                    (case synth
+                      (rest (setq synths (delete-if-not #'is-playing-p synths))
+                       (mapc #'release synths)
+                       (setq synths nil))
+                      (otherwise
+                       (push (synth synth
+                                    :freq (* (node-y node) 55.0)
+                                    :amp (channel-amp channel)
+                                    :pan (/ (node-pan node) pi)
+                                    :intensity (node-intensity node)
+                                    :decay (node-decay node)
+                                    :reverb (node-reverb node)
+                                    :mutate (node-mutate node))
+                             synths))))))))
           (find-swept-nodes node-base
                             (window-to-logical-x tape-x)
                             (window-to-logical-x new-tape-x)))
@@ -411,7 +411,7 @@
                                        logical-mouse-y)
            (let ((wx (logical-to-window-x cx))
                  (wy (logical-to-window-y cy)))
-             (text (format nil "P~S: ~S, ~S" player-id (mod cx 1) cy) wx wy)
+             (text (format nil "~S: ~S, ~S" player-id (mod cx 1) cy) wx wy)
              (case state
                (:insert
                 (setq logical-candidate-x cx)
@@ -434,7 +434,6 @@
                               (logical-to-window-y (node-y base-node)))))))
                (:move
                 (node-move-to selected-node cx cy)))))
-
          (case state
            (:insert
             (crosshair (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y)))
@@ -485,7 +484,7 @@
         (yrel (- (/ yrel *window-height*))))
     (with-slots (player-id socket side-socket) window
       (handle-mousemotion window player-id x y yrel)
-      (pzmq:send (if (= player-id 0)
+      (pzmq:send (if (eq player-id 'root)
                      socket side-socket)
                  (write-to-string (list 'handle-mousemotion player-id x y yrel))))))
 (defun handle-mousebutton (window player-id new-id mouse-state button)
@@ -541,7 +540,7 @@
 (defmethod kit.sdl2:mousebutton-event ((window tree) mouse-state timestamp button x y)
   (with-slots (player-id socket side-socket) window
     (let ((new-id (handle-mousebutton window player-id nil mouse-state button)))
-      (pzmq:send (if (= player-id 0)
+      (pzmq:send (if (eq player-id 'root)
                      socket side-socket)
                  (write-to-string (list 'handle-mousebutton player-id new-id mouse-state button))))))
 (defun handle-textinput (window player-id text)
@@ -572,14 +571,14 @@
 (defmethod kit.sdl2:textinput-event ((window tree) ts text)
   (with-slots (player-id socket side-socket) window
     (handle-textinput window player-id text)
-    (pzmq:send (if (= player-id 0)
+    (pzmq:send (if (eq player-id 'root)
                    socket side-socket)
                (write-to-string (list 'handle-textinput player-id text)))))
 (defmethod initialize-instance :before ((window tree) &rest things)
   (multiple-value-bind (_ w h) (sdl2:get-current-display-mode 0)
     (setq *window-width* (round (* w 2/3)))
     (setq *window-height* (round (* h 2/3)))))
-(defmethod initialize-instance :after ((window tree) &rest things &key (player-id 0))
+(defmethod initialize-instance :after ((window tree) &rest things &key (player-id 'root))
   (setq pzmq:*default-context* (pzmq:ctx-new))
   (setf (slot-value window 'player-id) player-id)
   (sdl2:hide-cursor)
@@ -587,7 +586,7 @@
   (with-slots (socket side-socket player-id width height title) window
     (setq title (format nil "Just Tree (Player ~S)" player-id))
     (sdl2:set-window-title (kit.sdl2:sdl-window window) title)
-    (if (= player-id 0)
+    (if (eq player-id 'root)
         (progn
           (setq socket (pzmq:socket pzmq:*default-context* :pub))
           (pzmq:bind socket "tcp://*:2333")

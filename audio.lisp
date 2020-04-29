@@ -3,7 +3,7 @@
 (setf *s*
       (make-external-server
        "localhost"
-       :port (+ 48800 cl-user::*cli-player-id*)
+       :port 48800
        :server-options
        (make-server-options
         ;;:device "Multi-Output Device"
