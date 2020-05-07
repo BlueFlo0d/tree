@@ -174,18 +174,10 @@
                        (setf (slot-value node param)
                              (funcall trim-function (+ delta (slot-value node param)))))))
 
-(defun find-nearest-node (node-base x y)
-  (let ((nearest-distance (+ *logical-width* *logical-height*))
-        (nearest-node))
-    (mapc (lambda (node)
-            (let ((my-distance (+ (abs (- x (node-x node)))
-                                  (abs (- y (node-y node))))))
-              (when (< my-distance nearest-distance)
-                (setq nearest-node node)
-                (setq nearest-distance my-distance))))
-          (node-base-nodes node-base))
-    nearest-node))
+(defparameter *node-buffering-dx* 0.1)
 (defun find-swept-nodes (node-base x-start x-end)
+  (incf x-start *node-buffering-dx*)
+  (incf x-end *node-buffering-dx*)
   (when (< x-end x-start)
     (setq x-start (- x-start *logical-width*)))
   (remove-if-not (lambda (node)
@@ -235,8 +227,8 @@
   (y 0)
   (state :insert)
   (edit-parameter 'intensity)
-  (logical-candidate-x)
-  (logical-candidate-y)
+  (logical-candidate-x 0)
+  (logical-candidate-y 0)
   (base-node)
   (selected-node)
   (selected-channel 0))
@@ -250,6 +242,18 @@
     (when (node-mute node)
       (setq color (mapcar (lambda (x) (/ (+ x 1.5) 3)) color)))
     color))
+(defun find-nearest-node (node-base x y)
+  (let ((nearest-distance (+ *logical-width* *logical-height*))
+        (nearest-node))
+    (mapc (lambda (node)
+            (let ((my-distance (+ (abs (- x (node-x node)))
+                                  (abs (- y (node-y node))))))
+              (when (< my-distance nearest-distance)
+                (setq nearest-node node)
+                (setq nearest-distance my-distance))))
+          (node-base-nodes node-base))
+    nearest-node))
+
 (defsketch tree
     ((title "Just Tree (loading...)")
      (width *window-width*)
@@ -257,10 +261,7 @@
      (initial-time (local-time:now))
      (tape-x 0)
      (node-base (node-base-add (make-node-base) (make-node :y 1)))
-     (cursors
-      (let ((new-cursors (make-hash-table)))
-        (setf (gethash 0 new-cursors) (make-cursor))
-        new-cursors))
+     (cursors (make-hash-table))
      (activations nil)
      (synths nil)
      (player-id 'root)
@@ -298,8 +299,7 @@
                           (maphash
                            (lambda (key cursor)
                              (with-slots (base-node selected-node) cursor
-                               (when base-node
-                                 (setq base-node (gethash (node-id base-node) (node-base-idtable node-base))))
+                               (setq base-node (gethash (node-id base-node) (node-base-idtable node-base)))
                                (when selected-node
                                  (setq selected-node (gethash (node-id selected-node) (node-base-idtable node-base))))))
                            cursors))
@@ -323,23 +323,26 @@
     (mapc (lambda (node)
             (let ((channel (aref *channel-settings* (node-channel node))))
               (unless (node-mute node)
-                (when (eq player-id 'audio)
+                (when *enable-audio-p*
                   (let ((synth  (channel-synth
                                  channel)))
-                    (case synth
-                      (rest (setq synths (delete-if-not #'is-playing-p synths))
-                       (mapc #'release synths)
-                       (setq synths nil))
-                      (otherwise
-                       (push (synth synth
-                                    :freq (* (node-y node) 55.0)
-                                    :amp (channel-amp channel)
-                                    :pan (/ (node-pan node) pi)
-                                    :intensity (node-intensity node)
-                                    :decay (node-decay node)
-                                    :reverb (node-reverb node)
-                                    :mutate (node-mutate node))
-                             synths))))))))
+                    (at (+ (cl-collider::sched-time
+                            (cl-collider::scheduler *s*))
+                           (- (node-x node) (window-to-logical-x tape-x)))
+                      (case synth
+                        (rest (setq synths (delete-if-not #'is-playing-p synths))
+                         (mapc #'release synths)
+                         (setq synths nil))
+                        (otherwise
+                         (push (synth synth
+                                      :freq (* (node-y node) 55.0)
+                                      :amp (channel-amp channel)
+                                      :pan (/ (node-pan node) pi)
+                                      :intensity (node-intensity node)
+                                      :decay (node-decay node)
+                                      :reverb (node-reverb node)
+                                      :mutate (node-mutate node))
+                               synths)))))))))
           (find-swept-nodes node-base
                             (window-to-logical-x tape-x)
                             (window-to-logical-x new-tape-x)))
@@ -356,8 +359,12 @@
                        (node-x node)))
                   (wy (logical-to-window-y
                        (node-y node)))
-                  (radius (+ 10
-                             (* 20 (node-decay node))))
+                  (radius (* (+ 10
+                                (* 20 (node-decay node)))
+                             (if (eq node (cursor-selected-node
+                                           (ensure-player-id cursors node-base player-id)))
+                                 3/2
+                                 1)))
                   (color (node-color-list node)))
               (with-pen (make-pen :fill (apply #'rgb `(,@color ,(* 0.8 (node-intensity node))))
                                   :stroke (apply #'rgb `(,@color 1.0)))
@@ -402,8 +409,6 @@
        (with-pen (let ((color (channel-color (aref *channel-settings* selected-channel))))
                    (make-pen :fill (apply #'rgb `(,@color 0.4))
                              :stroke (apply #'rgb `(,@color 0.8))))
-         (when (or (eq state :insert) (eq state :select))
-           (setq base-node (find-nearest-node node-base logical-mouse-x logical-mouse-y)))
          (multiple-value-bind (cx cy)
              (get-candidate-coordinate (node-x base-node)
                                        (node-y base-node)
@@ -412,15 +417,25 @@
            (let ((wx (logical-to-window-x cx))
                  (wy (logical-to-window-y cy)))
              (text (format nil "~S: ~S, ~S" player-id (mod cx 1) cy) wx wy)
-             (case state
-               (:insert
-                (setq logical-candidate-x cx)
-                (setq logical-candidate-y cy)
-                (if (and (= cx (node-x base-node))
-                         (= cy (node-y base-node)))
-                    (setq selected-node base-node)
-                    (progn
+             (flet ((update-selected ()
                       (setq selected-node nil)
+                      (mapc (lambda (n)
+                              (when (< (+ (abs (- (logical-to-window-x logical-mouse-x)
+                                                  (logical-to-window-x (node-x n))))
+                                          (abs (- (logical-to-window-y logical-mouse-y)
+                                                  (logical-to-window-y (node-y n)))))
+                                       10)
+                                (setq selected-node n)))
+                            (node-base-nodes node-base))))
+               (case state
+                 (:select (update-selected))
+                 (:insert
+                  (setq logical-candidate-x cx)
+                  (setq logical-candidate-y cy)
+                  (update-selected)
+                  (unless selected-node
+                    (unless (and (= cx (node-x base-node))
+                                 (= cy (node-y base-node)))
                       (with-pen (let ((color (channel-color
                                               (aref *channel-settings* selected-channel))))
                                   (make-pen :fill (apply #'rgb `(,@color 1.0))
@@ -432,8 +447,8 @@
                         (line wx wy
                               (logical-to-window-x (node-x base-node))
                               (logical-to-window-y (node-y base-node)))))))
-               (:move
-                (node-move-to selected-node cx cy)))))
+                 (:move
+                  (node-move-to selected-node cx cy))))))
          (case state
            (:insert
             (crosshair (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y)))
@@ -443,7 +458,7 @@
             (circle (logical-to-window-x logical-mouse-x) (logical-to-window-y logical-mouse-y) 5))))))
    cursors)
   ;; draw hint
-  (let ((node (cursor-selected-node (gethash player-id cursors))))
+  (let ((node (cursor-base-node (ensure-player-id cursors node-base player-id))))
     (when node
       (let ((channel (aref *channel-settings* (node-channel node))))
         (unless (node-mute node)
@@ -461,14 +476,16 @@
                                             :reverb (node-reverb node)
                                             :mutate (node-mutate node)))
                      0 0)))))))))
-(defun ensure-player-id (cursors player-id)
+(defun ensure-player-id (cursors node-base player-id)
   (unless (gethash player-id cursors)
-    (setf (gethash player-id cursors) (make-cursor)))
+    (let ((new-cursor (make-cursor)))
+      (setf (cursor-base-node new-cursor) (car (node-base-nodes node-base)))
+      (setf (gethash player-id cursors) new-cursor)))
   (gethash player-id cursors))
 (defun handle-mousemotion (window player-id x y yrel)
-  (with-slots (cursors) window
+  (with-slots (cursors node-base) window
     (with-slots ((logical-mouse-x x) (logical-mouse-y y) selected-node state edit-parameter)
-        (ensure-player-id cursors player-id)
+        (ensure-player-id cursors node-base player-id)
       (setq logical-mouse-x x)
       (setq logical-mouse-y y)
       (case state
@@ -490,20 +507,18 @@
 (defun handle-mousebutton (window player-id new-id mouse-state button)
   (with-slots (node-base cursors)
       window
-    (with-slots (base-node
-                 logical-candidate-x logical-candidate-y
-                 state selected-node selected-channel)
-        (ensure-player-id cursors player-id)
+    (with-slots (logical-candidate-x logical-candidate-y
+                 state base-node selected-node selected-channel)
+        (ensure-player-id cursors node-base player-id)
       (case mouse-state
         (:mousebuttondown
          (case button
            (1 (case state
                 (:insert
-                 (if (and (= (node-x base-node) logical-candidate-x)
-                          (= (node-y base-node) logical-candidate-y))
-                     (when (node-parent base-node)
+                 (if selected-node
+                     (when (node-parent selected-node)
                        (setq state :move)
-                       (setq base-node (node-parent base-node)))
+                       (setq base-node (node-parent selected-node)))
                      (progn
                        (unless new-id (setq new-id (gen-id player-id)))
                        (let ((new-node
@@ -518,22 +533,32 @@
                                           :mutate (node-mutate base-node)
                                           :mute (node-mute base-node)
                                           :id new-id)))
-                         (node-base-add node-base new-node)))))
+                         (node-base-add node-base new-node)
+                         (setq base-node new-node)))))
                 (:select
-                 (setq selected-node base-node)
                  (setq state :edit)
                  (sdl2:set-relative-mouse-mode 1))))
            (3 (case state
-                (:insert (node-base-delete node-base base-node))
-                (:select (let ((newval (not (node-mute base-node))))
-                           (with-node-subtree (base-node)
-                                              (setf (node-mute node)
-                                                    newval))))))))
+                (:insert
+                 (when selected-node
+                   (let ((np (node-parent selected-node)))
+                     (when np
+                       (node-base-delete node-base selected-node)
+                       (setq base-node np)))
+                   (setq selected-node nil)))
+                (:select
+                 (when selected-node
+                   (let ((newval (not (node-mute selected-node))))
+                     (with-node-subtree (selected-node)
+                                        (setf (node-mute node)
+                                              newval)))))))))
         (:mousebuttonup
          (case state
-           (:move (setq state :insert))
-           (:edit
+           (:move
+            (setq base-node selected-node)
             (setq selected-node nil)
+            (setq state :insert))
+           (:edit
             (sdl2:set-relative-mouse-mode 0)
             (setq state :select)))))))
   new-id)
@@ -544,8 +569,9 @@
                      socket side-socket)
                  (write-to-string (list 'handle-mousebutton player-id new-id mouse-state button))))))
 (defun handle-textinput (window player-id text)
-  (with-slots (cursors) window
-    (with-slots (selected-channel state edit-parameter) (ensure-player-id cursors player-id)
+  (with-slots (cursors node-base) window
+    (with-slots (selected-channel state edit-parameter)
+        (ensure-player-id cursors node-base player-id)
       (case (aref text 0)
         (#\1 (setq selected-channel 0))
         (#\2 (setq selected-channel 1))

@@ -10,7 +10,6 @@
         :num-input-bus 0
         :num-output-bus 2
         )))
-(server-boot *s*)
 ;; (server-quit *s*)
 (defun setup-server ()
   (defparameter *echo-bus* (bus-audio :chanls 2))
@@ -112,7 +111,7 @@
         (out.ar *perc-bus* (* panned (- 1 reverb)))
         (out.ar *echo-bus* (* panned reverb)))))
   )
-(setup-server)
+
 (defun restart-server ()
   (server-quit *s*)
   (server-boot *s*)
