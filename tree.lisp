@@ -178,6 +178,8 @@
 (defun find-swept-nodes (node-base x-start x-end)
   (incf x-start *node-buffering-dx*)
   (incf x-end *node-buffering-dx*)
+  (setq x-start (mod x-start *logical-width*))
+  (setq x-end (mod x-end *logical-width*))
   (when (< x-end x-start)
     (setq x-start (- x-start *logical-width*)))
   (remove-if-not (lambda (node)
@@ -200,7 +202,10 @@
     (let ((xc) (yc) (yerr *logical-height*))
       (multiple-value-bind (x4c x4p) (candidate-for-division x0 x 4)
         (setq xc (if (> (abs x4p) 1) x4c
-                     (nth-value 0 (candidate-for-division x0 x 16)))))
+                     (let ((x16c (candidate-for-division x0 x 16))
+                           (x12c (candidate-for-division x0 x 12)))
+                       (if (> (* 2 (abs (- x16c x))) (abs (- x12c x)))
+                           x12c x16c)))))
       (setq yc y0)
       (mapc (lambda (division)
               (multiple-value-bind (ync yne)
@@ -253,7 +258,29 @@
                 (setq nearest-distance my-distance))))
           (node-base-nodes node-base))
     nearest-node))
-
+(defun tree-load (tree l)
+  (mapc (lambda (item)
+          (when (eq (caar item) *cli-player-id*)
+            (when (> (cdar item) last-gen-id)
+              (setq last-gen-id (cdar item)))))
+        l)
+  (with-slots (node-base cursors) tree
+    (setq node-base
+          (node-base-load l))
+    (maphash
+     (lambda (key cursor)
+       (with-slots (base-node selected-node) cursor
+         (let ((new-base
+                 (gethash (node-id base-node) (node-base-idtable node-base))))
+           (if new-base
+               (setq base-node new-base)
+               (progn
+                 (setq base-node (find-nearest-node node-base
+                                                    (node-x base-node)
+                                                    (node-y base-node))))))
+         (when selected-node
+           (setq selected-node (gethash (node-id selected-node) (node-base-idtable node-base))))))
+     cursors)))
 (defsketch tree
     ((title "Just Tree (loading...)")
      (width *window-width*)
@@ -294,15 +321,7 @@
                        (typecase (car list)
                          (local-time:timestamp
                           (setq initial-time (car list))
-                          (setq node-base
-                                (node-base-load (cdr list)))
-                          (maphash
-                           (lambda (key cursor)
-                             (with-slots (base-node selected-node) cursor
-                               (setq base-node (gethash (node-id base-node) (node-base-idtable node-base)))
-                               (when selected-node
-                                 (setq selected-node (gethash (node-id selected-node) (node-base-idtable node-base))))))
-                           cursors))
+                          (tree-load sketch::instance (cdr list)))
                          (symbol
                           (when (not (eq (cadr list) player-id))
                             (apply (symbol-function (car list))
@@ -324,11 +343,13 @@
             (let ((channel (aref *channel-settings* (node-channel node))))
               (unless (node-mute node)
                 (when *enable-audio-p*
-                  (let ((synth  (channel-synth
-                                 channel)))
+                  (let ((synth (channel-synth
+                                channel)))
                     (at (+ (cl-collider::sched-time
                             (cl-collider::scheduler *s*))
-                           (- (node-x node) (window-to-logical-x tape-x)))
+                           (mod
+                            (- (node-x node) (window-to-logical-x tape-x))
+                            *logical-width*))
                       (case synth
                         (rest (setq synths (delete-if-not #'is-playing-p synths))
                          (mapc #'release synths)
@@ -516,9 +537,11 @@
            (1 (case state
                 (:insert
                  (if selected-node
-                     (when (node-parent selected-node)
-                       (setq state :move)
-                       (setq base-node (node-parent selected-node)))
+                     (if (node-parent selected-node)
+                         (progn
+                           (setq state :move)
+                           (setq base-node (node-parent selected-node)))
+                         (setq base-node selected-node))
                      (progn
                        (unless new-id (setq new-id (gen-id player-id)))
                        (let ((new-node

@@ -10,4 +10,5 @@
   :components ((:file "package")
                (:file "sc-patch")
                (:file "audio" :depends-on ("sc-patch"))
-               (:file "tree" :depends-on ("audio"))))
+               (:file "tree" :depends-on ("audio"))
+               (:file "presets" :depends-on ("tree"))))

@@ -15,5 +15,4 @@
 (defun master-tree-node-dump ()
   (node-base-dump (slot-value master-tree 'node-base)))
 (defun master-tree-node-load (l)
-  (setf (slot-value master-tree 'node-base)
-        (node-base-load l)))
+  (tree-load master-tree l))
